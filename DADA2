@@ -1,0 +1,123 @@
+#sort out the .fastq files into forward and reverse reads and separate them into
+# fnFs and fnRs groups
+fnFs <- sort(list.files("C:/Users/yousef elkenawy/Desktop/16S_data", pattern = "_R1_001.fastq"))
+fnRs <- sort(list.files("C:/Users/yousef elkenawy/Desktop/16S_data", pattern = "_R2_001.fastq"))
+
+# Extract sample names, assuming filenames have format: SAMPLENAME_XXX.fastq
+sample.names <- sapply(strsplit(fnFs, "_"), `[`, 1)
+sample.names <- sapply(strsplit(fnRs, "_"), `[`, 1)
+
+# Specify the full path to the fnFs and fnRs
+fnFs <- file.path("C:/Users/yousef elkenawy/Desktop/16S_data", fnFs)
+fnRs <- file.path("C:/Users/yousef elkenawy/Desktop/16S_data", fnRs)
+
+#examine quality profiles
+plotQualityProfile(fnFs[1:6])
+plotQualityProfile(fnRs[1:6])
+
+#filtering and trimming
+#filt_path <- file.path("/Users/elnaggar/Desktop/New_project/16S/", "/Users/elnaggar/Desktop/New_project/16S/filtered") # Place filtered files in filtered/ subdirectory
+filtFs <- file.path("C:/Users/yousef elkenawy/Desktop/16S_data", paste0(sample.names, "_F_filt.fastq"))
+filtRs <- file.path("C:/Users/yousef elkenawy/Desktop/16S_data", paste0(sample.names, "_R_filt.fastq"))
+
+out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(200,150),
+                     maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
+                     compress=TRUE, multithread=FALSE) # On Windows set multithread=FALSE
+head(out)
+#learn error
+errF <- learnErrors(filtFs, multithread=TRUE)
+errR <- learnErrors(filtRs, multithread=TRUE)
+
+#plot the errors as a sanity check 
+plotErrors(errF, nominalQ=TRUE)
+plotErrors(errR, nominalQ=TRUE)
+
+
+#dereplicate sequences
+derepFs <- derepFastq(filtFs, verbose=TRUE)
+derepRs <- derepFastq(filtRs, verbose=TRUE)
+
+# Name the derep-Order objects by the sample names
+names(derepFs) <- sample.names
+names(derepRs) <- sample.names
+
+#sample inference using sequence variant inference New_project/algorithm on dereped data
+dadaFs <- dada(derepFs, err=errF, multithread=TRUE)
+dadaRs <- dada(derepRs, err=errR, multithread=TRUE)
+
+#Inspecting the dada-Order object returned by dada:
+dadaFs
+
+#Merge paired reads
+#Spurious sequence variants are further reduced by merging overlapping reads. The core function here is mergePairs, which depends on the forward and reverse reads being in matching Order at the Diet they were dereplicated.
+
+#Merge the denoised forward and reverse reads:
+mergers <- mergePairs(dadaFs, derepFs, dadaRs, derepRs, verbose=TRUE)
+
+# Inspect the merger data.frame from the first sample
+head(mergers[[1]])
+
+#We now have a data.frame for each sample with the merged $sequence, its $abundance, and the indices of the merged $forward and  $reverse denoised sequences. Paired reads that did not exactly overlap were removed by mergePairs.
+
+
+#Construct sequence table
+#We can now construct a â€œsequence tableâ€ of our mouse samples, a higher-resolution version of the â€œOTU tableâ€ produced by Orderical methods:
+
+seqtab <- makeSequenceTable(mergers)
+dim(seqtab)
+
+# Inspect distribution of sequence lengths
+table(nchar(getSequences(seqtab)))
+
+
+
+#Remove chimeras
+#The core dada method removes substitution and indel errors, but chimeras remain. Fortunately, the accuracy of the sequences after denoising makes identifying chimeras simpler than it is when dealing with fuzzy OTUs: all sequences which can be exactly reconstructed as a bimera (two-parent chimera) from more abundant sequences.
+
+#Remove chimeric sequences:
+
+seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
+
+dim(seqtab.nochim)
+
+sum(seqtab.nochim)/sum(seqtab)
+
+#The fraction of chimeras varies based on factors including experimental procedures and sample complexity, but can be substantial. Here chimeras make up about 20% of the inferred sequence variants, but those variants account for only about 4% of the total sequence reads.
+
+#Track reads through the pipeline
+#As a final check of our progress, weâ€™ll look at the number of reads that made it through each step in the pipeline:
+
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out, sapply(dadaFs, getN), sapply(mergers, getN), rowSums(seqtab), rowSums(seqtab.nochim))
+colnames(track) <- c("input", "filtered", "denoised", "merged", "tabled", "nonchim")
+rownames(track) <- sample.names
+head(track)
+
+
+#Looks good, we kept the majority of our raw reads, and there is no over-large drop associated with any single step.
+
+#Assign taxonomy
+#It is common at this point, especially in 16S/18S/ITS amplicon sequencing, to Orderify sequence variants taxonomically. The DADA2 package provides a native implementation of the RDPâ€™s naive Bayesian Orderifier for this purpose. The assignTaxonomy function takes a set of sequences and a training set of taxonomically Orderified sequences, and outputs the taxonomic assignments with at least minBoot bootstrap confidence.
+
+#We maintain formatted training fastas for the RDP training set, GreenGenes clustered at 97% identity, and the Silva reference database. For fungal taxonomy, the General Fasta release files from the UNITE ITS database can be used as is. To follow along, download the  rdp_train_set_16.fa.gz file, and place it in the directory with the fastq files.
+
+#Assign taxonomy:
+
+
+taxa <- assignTaxonomy(seqtab.nochim, "C:/Users/yousef elkenawy/Desktop/16S_data/silva_nr_v128_train_set.fa.gz", multithread=TRUE, tryRC = TRUE)
+
+#Optional: The dada2 package also implements a method to make species level assignments based on exact matching between ASVs and sequenced reference strains.
+
+#taxa <- addSpecies(taxa, "C:/Users/yousef elkenawy/Desktop/16S_data/silva_species_assignment_v128.fa.gz")
+
+
+# A quick taxonomic inspection:
+taxa.print <- taxa # Removing sequence rownames for display only
+rownames(taxa.print) <- NULL
+head(taxa.print)
+
+
+#save all your files as tables externally> write.table(seqtab.nochim, file = "/Volumes/SBPD/grazing_Lewis/lewis_fastq/uparse_otus/lewis.asv_table.txt", col.names = TRUE, row.names = TRUE)
+write.table(seqtab.nochim, file = "C:/Users/yousef elkenawy/Desktop/16S_data/dada2.asv_table.txt", col.names = TRUE, row.names = TRUE, sep = "\t")
+write.table(track, file = "C:/Users/yousef elkenawy/Desktop/16S_data/dada2.asv_track.txt", col.names = TRUE, row.names = TRUE, sep = "\t")
+write.table(taxa, file = "C:/Users/yousef elkenawy/Desktop/16S_data/dada2.asv_taxa.txt", col.names = TRUE, row.names = TRUE, sep = "\t")
