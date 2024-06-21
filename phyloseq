@@ -1,0 +1,115 @@
+mapping <- read.delim2("C:/Users/yousef elkenawy/Desktop/mapping.txt")
+mapping <- as.data.frame(mapping)
+rownames(mapping) <- mapping[ , 1]
+class(mapping)
+head(mapping)
+mapping
+
+local = TRUE)
+install_phyloseq(branch = "devel")
+library("dada2")
+library("phyloseq")
+library("ggplot2")
+library("magrittr")
+library("Biostrings")
+library("ape")
+library("vegan")
+library("plyr")
+library("scales")
+library("grid")
+library("reshape2")
+
+
+
+
+
+asv_nochim = otu_table(seqtab.nochim, taxa_are_rows = F)
+tax = tax_table(taxa) # make 'tax_table' into a matrix
+mapping <- sample_data(mapping)
+#merge everything into one object:
+ps = merge_phyloseq(asv_nochim, tax, mapping)
+ps 
+
+#################################################################################################################
+
+######phyloseq################
+
+#Alpha_diversity:#######################
+#indices <- c("Observed", "Chao1", "ACE", "Shannon", "Simpson", "InvSimpson", "Fisher")
+indices <- c("Observed", "Chao1", "ACE", "Shannon", "Simpson", "InvSimpson")
+plot_richness(ps, x= "Concentration", color = "Concentration", measures = indices) +
+  geom_boxplot(aes(fill = Concentration), alpha = 0.2)+ labs(title = "Fungal Alpha Diversity Measurements")
+indices <- c("Observed", "Chao1", "Shannon", "Simpson")
+plot_richness(ps, x= "Concentration", color = "Concentration", measures = indices) +
+  geom_boxplot(aes(fill = Concentration), alpha = 0.2)+ labs(title = "Fungal Alpha Diversity Measurements")
+
+ps
+###############################
+## Beta diversity
+M_ps.relabund <- transform_sample_counts(ps, function (OTU) OTU/sum(OTU))
+M_ps.relabund
+
+#view("M_ps.relabund")
+## make Bray-Curtis PCoA plot
+bray_ord_M <- ordinate(M_ps.relabund, method = "PCoA", distance = "bray")
+bray_pcoa_M <- plot_ordination(M_ps.relabund, bray_ord_M, color = "Concenteration") + ggtitle("PCoA plot of Fungal Communities - Bray Curtis") + theme(plot.title = element_text(hjust = 0.5, size = 30), legend.title = element_text(size = 30))
+bray_pcoa_M
+
+bray_ord_M <- ordinate(M_ps.relabund, method = "PCoA", distance = "unwunifrac")
+bray_pcoa_M <- plot_ordination(M_ps.relabund, bray_ord_M, color = "Concentration") + ggtitle("PCoA plot of Fungal Communities - Unweighted UniFrac") + theme(plot.title = element_text(hjust = 0.5, size = 10), legend.title = element_text(size = 10))
+bray_pcoa_M
+
+bray_ord_M <- ordinate(M_ps.relabund, method = "PCoA", distance = "wunifrac")
+bray_pcoa_M <- plot_ordination(M_ps.relabund, bray_ord_M, color = "Concentration") + ggtitle("PCoA plot ofFungal Communities - Weighted UniFrac") + theme(plot.title = element_text(hjust = 0.5, size = 10), legend.title = element_text(size = 10))
+bray_pcoa_M
+## make Bray-Curtis NMDS plot
+bray_ord_M <- ordinate(M_ps.relabund, method = "NMDS", distance = "bray")
+bray_nmds_M <- plot_ordination(M_ps.relabund, bray_ord_M, color = "Concentration") + ggtitle("NMDS plot of Fungal Communities - Bray-Curtis") + theme(plot.title = element_text(hjust = 0.5, size = 10), legend.title = element_text(size = 10))
+bray_nmds_M
+
+bray_ord_M <- ordinate(M_ps.relabund,  method = "MDS", distance = "unwunifrac")
+bray_nmds_M <- plot_ordination(M_ps.relabund, bray_ord_M, color = "Concentration") + ggtitle("NMDS plot of Fungal Communities - Unweighted UniFrac") + theme(plot.title = element_text(hjust = 0.5, size = 10), legend.title = element_text(size = 10))
+bray_nmds_M
+
+bray_ord_M <- ordinate(M_ps.relabund,  method = "MDS", distance = "wunifrac")
+bray_nmds_M <- plot_ordination(M_ps.relabund, bray_ord_M, color = "Concentration") + ggtitle("NMDS plot of Fungal Communities - Weighted UniFrac") + theme(plot.title = element_text(hjust = 0.5, size = 10), legend.title = element_text(size = 10))
+bray_nmds_M
+################################
+#Heatmap
+ps
+plot_heatmap(ps, sample.label="Concentration", sample.Species = "Concentration")
+
+
+#Taxonomy bar plot################
+
+#Species taxplots
+dr_fam <- tax_glom(ps, taxrank = "Species", NArm = F)
+ps0<-names(sort(taxa_sums(dr_fam), TRUE)[1:20]) #get most abundant ones
+ps1<-prune_taxa(ps0, dr_fam)
+
+asv_Species <- ps1 %>% 
+  tax_glom(taxrank = "Species") %>%                     # agglomerate at Species level
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt() %>%                                         # Melt to long format
+  #filter(Abundance > 0.005) %>%                         # Filter out low abundance taxa
+  arrange(Species)                                    # Sort data frame alphabetically by Species
+
+Species_colors <- c(
+  "#CBD588", "green", "blue", "purple", "yellow", "#5F7FC7", "red","orange","#DA5724", "#508578", "#CD9BCD",
+  "#AD6F3B", "#673770","#D14285", "#652926", "#C84248", 
+  "#8569D5", "#5E738F","#D1A33D", "#8A7C64", "#599861", "goldenrod", 
+  "mediumpurple1", "lightcoral", "brown")
+
+
+ggplot(asv_Species, aes(x =Concentration, y = Abundance, fill = Species)) + 
+  #facet_grid(Diet~.) +
+  geom_bar(stat = "identity", position = "Fill") +
+  scale_fill_manual(values = Species_colors) +
+  
+  # Remove x axis title
+  theme(axis.title.x = element_blank()) + 
+  #
+  guides(fill = guide_legend(reverse = TRUE, keywidth = 0.5, keyheight = 1.5)) +
+  ylab("Species Relative Abundance \n") +
+  ggtitle("Species Composition of Fungal Communities Across Different Concentrations ")
+
